@@ -322,4 +322,20 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
 }
 
 
+// CUSTOM ADDITIONS START
 
+bool get_permissive_hold(uint16_t keycode, keyrecord_t *record) {
+    switch (keycode) {
+        // we do not want to enable permissive hold for alphas that are rarely used for holding
+        case MT(MOD_LALT, KC_QUOTE):
+        case MT(MOD_LCTL, KC_E):
+        case MT(MOD_RCTL, KC_T):
+        case MT(MOD_RALT, KC_B):
+            return false;
+        default:
+            // Enable permissive hold for all other keys
+            return true;
+    }
+}
+
+// CUSTOM ADDITIONS END
