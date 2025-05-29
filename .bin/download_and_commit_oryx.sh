@@ -1,81 +1,87 @@
 #!/usr/bin/env bash
 
+set -euo pipefail
+
 # Save working directory
 
 PWD=$(pwd)
 
-SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+
+oryx_json_file_path="$SCRIPT_DIR/../oryx.json"
+existing_layout_id=''
 
 cd $SCRIPT_DIR/..
 
-# Download latest Oryx keymap and commit to oryx branch
+if [ -f "$oryx_json_file_path" ]; then
+  existing_layout_id=$(cat "$oryx_json_file_path" | jq -r '.layoutId')
+  echo "found existing oryx info with layout ID '$existing_layout_id'"
+fi
 
-git checkout -B oryx origin/oryx
-
-hashId=$(jq -r .'layout' $SCRIPT_DIR/../config.json)
-
+layout_id=$(jq -r .'layout' $SCRIPT_DIR/../config.json)
 geometry=$(jq -r .'geometry' $SCRIPT_DIR/../config.json)
 
-response=$(curl --location 'https://oryx.zsa.io/graphql' --header 'Content-Type: application/json' --data '{"query":"query getLayout($hashId: String!, $revisionId: String!, $geometry: String) {layout(hashId: $hashId, geometry: $geometry, revisionId: $revisionId) {  revision { hashId, qmkVersion, title }}}","variables":{"hashId":"'$hashId'","geometry":"'$geometry'","revisionId":"latest"}}' | jq '.data.layout.revision | [.hashId, .qmkVersion, .title]')
+if [ "$layout_id" = "$existing_layout_id" ]; then
+  echo "configured layout '$layout_id' ID is same as existing oryx info; skipping..."
+  exit 0
+fi
 
-hash_id=$(echo "${response}" | jq -r '.[0]')
-firmware_version=$(printf "%.0f" $(echo "${response}" | jq -r '.[1]'))
-change_description=$(echo "${response}" | jq -r '.[2]')
+echo "found different layout ID '$layout_id'; updating..."
 
-keymap_dir="oryx".$(echo $hashId | tr '[:upper:]' '[:lower:]')
+response=$(curl --location 'https://oryx.zsa.io/graphql' --header 'Content-Type: application/json' --data '{"query":"query getLayout($hashId: String!, $revisionId: String!, $geometry: String) { layout(hashId: $hashId, geometry: $geometry, revisionId: $revisionId) { revision { hashId, qmkVersion, title } } }","variables":{"hashId":"'$layout_id'","geometry":"'$geometry'","revisionId":"latest"}}')
+
+echo "${response}"
+
+response=$(echo $response | jq '.data.layout.revision' | jq ". += {\"layoutId\":\"$layout_id\"}")
+
+hash_id=$(echo "${response}" | jq -r '.hashId')
+firmware_version=$(printf "%.0f" $(echo "${response}" | jq -r '.qmkVersion'))
+change_description=$(echo "${response}" | jq -r '.title')
+
+# on the oryx branch the keymap will always be the original from oryx, but by using a
+# stable dir name like this, we can merge changes from oryx into our modified version
+# on the main branch; this approach also lets us see the diff between the keymaps from
+# oryx
+keymap_dir="oryx.modified"
 
 if [ "$firmware_version" -ge 24 ]; then
-   keyboard_directory="zsa"
-   make_prefix="zsa/"
+  keyboard_directory="zsa"
 else
-   keyboard_directory=""
-   make_prefix=""
+  keyboard_directory=""
 fi
 
 if [[ -z "${change_description}" ]]; then
-   change_description="latest layout modification made with Oryx"
+  change_description="latest layout modification made with Oryx"
 fi
 
-curl -L "https://oryx.zsa.io/source/${hash_id}" -o $SCRIPT_DIR/../source.zip
+echo "${response}" >"$oryx_json_file_path"
 
-mkdir -p $SCRIPT_DIR/../userspace/keyboards/$keyboard_directory/$geometry/keymaps/$keymap_dir
+git fetch origin --prune
+git worktree add .oryx oryx
 
-unzip -oj $SCRIPT_DIR/../source.zip '*_source/*' -d $SCRIPT_DIR/../userspace/keyboards/$keyboard_directory/$geometry/keymaps/$keymap_dir
+cd .oryx
 
-rm $SCRIPT_DIR/../source.zip
+curl -L "https://oryx.zsa.io/source/${hash_id}" -o source.zip
 
-cd $SCRIPT_DIR/../userspace/keyboards/$keyboard_directory/$geometry/keymaps/$keymap_dir
+# no need to keep old keymaps around, they are in the git history
+rm -rf userspace/keyboards/$keyboard_directory/$geometry/keymaps
 
-git add .
+mkdir -p userspace/keyboards/$keyboard_directory/$geometry/keymaps/$keymap_dir
 
-git commit -m "✨(oryx): ${change_description}" || echo "No layout change"
+unzip -oj source.zip '*_source/*' -d userspace/keyboards/$keyboard_directory/$geometry/keymaps/$keymap_dir
+
+rm source.zip
+
+git add userspace/keyboards/$keyboard_directory/$geometry/keymaps
+
+git commit -m "✨(oryx/${layout_id}/${hash_id}): ${change_description}" || echo "No layout change"
 
 git push
-
-# Merge oryx keymap into main (where user modifications are)
 
 cd $SCRIPT_DIR/..
 
-git fetch origin main
+git worktree remove .oryx
 
-git checkout -B main origin/main
-git merge -Xignore-all-space oryx -m "Merging ✨(oryx): ${change_description}" 
-git push
-
-# Compile the firmware
-
-git submodule update --init --remote --depth=1
-cd qmk_firmware
-git checkout -B firmware$firmware_version origin/firmware$firmware_version
-git submodule update --init --recursive
-cd ..
-git add qmk_firmware
-git commit -m "✨(qmk): Update firmware" || echo "No QMK change"
-git push
-
-cd qmk_firmware
-qmk setup zsa/qmk_firmware -b firmware$firmware_version -y
-qmk config user.overlay_dir="$(realpath $SCRIPT_DIR/../userspace)"
-qmk compile -kb $keyboard_directory/$geometry -km $keymap_dir
+git rebase oryx
 
 cd $PWD
