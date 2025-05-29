@@ -54,7 +54,7 @@ qmk compile -kb "$keyboard_directory/$geometry" -km "$keymap_dir"
 
 mkdir -p "$SCRIPT_DIR/../firmwares"
 
-firmware_file_name="$firmware_prefix$(date '+%Y-%m-%d')_${layout_id}_${hash_id}.bin"
+firmware_file_name="$firmware_prefix$(date '+%Y-%m-%dT%H%M%S')_${layout_id}_${hash_id}.bin"
 echo "created firmware $firmware_file_name"
 
 for file in "$SCRIPT_DIR"/../qmk_firmware/.build/*.bin; do
