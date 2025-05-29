@@ -29,9 +29,9 @@ hash_id=$(cat "$oryx_json_file_path" | jq -r '.hashId')
 firmware_version=$(printf "%.0f" $(cat "$oryx_json_file_path" | jq -r '.qmkVersion'))
 
 if [ "$firmware_version" -ge 24 ]; then
-  keyboard_directory="zsa"
+    keyboard_directory="zsa"
 else
-  keyboard_directory=""
+    keyboard_directory=""
 fi
 
 keymap_dir="oryx.modified"
