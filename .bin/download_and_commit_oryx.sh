@@ -70,9 +70,15 @@ mkdir -p userspace/keyboards/$keyboard_directory/$geometry/keymaps/$keymap_dir
 
 unzip -oj source.zip '*_source/*' -d userspace/keyboards/$keyboard_directory/$geometry/keymaps/$keymap_dir
 
+sed -i 's/[[:space:]]*$//' userspace/keyboards/$keyboard_directory/$geometry/keymaps/$keymap_dir/*
+
 rm source.zip
 
 git add userspace/keyboards/$keyboard_directory/$geometry/keymaps
+
+cp $SCRIPT_DIR/../config.json config.json
+cp $SCRIPT_DIR/../oryx.json oryx.json
+git add config.json oryx.json
 
 git commit -m "✨(oryx/${layout_id}/${hash_id}): ${change_description}" || echo "No layout change"
 
@@ -82,6 +88,8 @@ cd $SCRIPT_DIR/..
 
 git worktree remove .oryx
 
+git stash
 git rebase oryx
+git stash pop
 
 cd $PWD

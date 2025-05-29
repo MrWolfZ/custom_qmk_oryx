@@ -8,6 +8,12 @@ PWD=$(pwd)
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+if [[ "$BRANCH" != "main" ]]; then
+  echo "build must only be executed from main branch, currently on branch '$BRANCH'"
+  exit 1
+fi
+
 oryx_json_file_path="$SCRIPT_DIR/../oryx.json"
 
 "$SCRIPT_DIR/download_and_commit_oryx.sh"
@@ -51,6 +57,8 @@ mkdir -p "$SCRIPT_DIR/../firmwares"
 firmware_file_name="$firmware_prefix$(date '+%Y-%m-%d')_${layout_id}_${hash_id}.bin"
 echo "created firmware $firmware_file_name"
 
-cp "$SCRIPT_DIR"/../qmk_firmware/.build/*.bin "$SCRIPT_DIR/../firmwares/$firmware_file_name"
+for file in "$SCRIPT_DIR"/../qmk_firmware/.build/*.bin; do
+  cp "$file" "$SCRIPT_DIR/../firmwares/$firmware_file_name"
+done
 
 cd $PWD
