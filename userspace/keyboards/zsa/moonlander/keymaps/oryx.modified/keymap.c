@@ -506,6 +506,15 @@ void act_on_hold_linger_rshft(uint16_t keycode) {
     unregister_code(KC_RIGHT_SHIFT);
 }
 
+uint16_t get_tapping_term(uint16_t keycode, keyrecord_t *record) {
+    switch (keycode) {
+        case LT(2, KC_SPACE):
+            return TAPPING_TERM_FOR_SPACE;
+        default:
+            return TAPPING_TERM;
+    }
+}
+
 bool get_permissive_hold(uint16_t keycode, keyrecord_t *record) {
     switch (keycode) {
         // we do not want to enable permissive hold for alphas that are rarely used for holding
@@ -515,9 +524,53 @@ bool get_permissive_hold(uint16_t keycode, keyrecord_t *record) {
         case MT(MOD_RALT, KC_B):
             return false;
         default:
-            // Enable permissive hold for all other keys
+            // enable permissive hold for all other keys
             return true;
     }
+}
+
+bool get_hold_on_other_key_press(uint16_t keycode, keyrecord_t *record) {
+    switch (keycode) {
+        // we only want to enable early hold detection for some very few keys that are rarely
+        // used in the normal flow of typing (with some exceptions like comma->space which are
+        // solved using chordal holds below)
+        case LT(4, KC_COMMA): // num layer on comma
+        case LT(5, KC_ENTER): // code layer on enter (left thumb)
+        case LT(3, KC_DOT): // symbol layer on period (right thumb)
+            return true;
+        default:
+            // do not select the hold action when another key is pressed.
+            return false;
+    }
+}
+
+bool get_chordal_hold(uint16_t tap_hold_keycode, keyrecord_t* tap_hold_record,
+                      uint16_t other_keycode, keyrecord_t* other_record) {
+    bool other_key_is_space = other_keycode == KC_SPACE || other_keycode == LT(2, KC_SPACE);
+    bool other_key_is_enter = other_keycode == KC_ENTER || other_keycode == LT(5, KC_ENTER);
+
+    // there are some special situations in which we want to always suppress holds, especially
+    // for keys with "hold on other key press" enabled
+    switch (tap_hold_keycode) {
+        case LT(4, KC_COMMA):
+            // a space or line break after a comma should never enter the hold
+            if (other_key_is_space || other_key_is_enter) {
+                return false;
+            }
+            break;
+
+        case LT(3, KC_DOT):
+            // when the dot is followed by a space or question mark, we still want to
+            // type the dot before the other key, so we exclude those chords (which is
+            // safe since those keys are the same on the symbol layer anyways)
+            if (other_key_is_space || other_keycode == KC_QUES) {
+                return false;
+            }
+            break;
+    }
+
+    // otherwise defer to the opposite hands rule
+    return get_chordal_hold_default(tap_hold_record, other_record);
 }
 
 // this is pretty much the default except KC_MINUS is not shifted, since we have
