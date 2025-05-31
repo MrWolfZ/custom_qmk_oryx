@@ -565,8 +565,9 @@ bool get_chordal_hold(uint16_t tap_hold_keycode, keyrecord_t* tap_hold_record,
         case LT(3, KC_DOT):
             // when the dot is followed by a space or question mark, we still want to
             // type the dot before the other key, so we exclude those chords (which is
-            // safe since those keys are the same on the symbol layer anyways)
-            if (other_key_is_space || other_keycode == KC_QUES) {
+            // safe since those keys are the same on the symbol layer anyways); we also
+            // want to exclude the slash/hash key since ./ is a frequent bigram
+            if (other_key_is_space || other_keycode == KC_QUES || other_keycode == KC_SLASH || other_keycode == KC_HASH) {
                 return false;
             }
             break;
