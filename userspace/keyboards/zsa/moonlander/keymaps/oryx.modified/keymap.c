@@ -480,30 +480,33 @@ const char chordal_hold_layout[MATRIX_ROWS][MATRIX_COLS] PROGMEM =
                           '*', '*', '*', '*', '*', '*'
     );
 
-void act_on_hold_linger_lshft(uint16_t keycode) {
+void act_on_hold_linger_shft(uint16_t keycode, uint16_t shift_keycode) {
+    // the mask is getting rid of any mod/layer that might be attached to the letter
+    bool is_letter = (keycode & 0x00FF) >= KC_A && (keycode & 0x00FF) <= KC_Z;
+
+    // shifting only makes sense for letters
+    if (!is_letter) {
+        return;
+    }
+
     // first, we delete the character that should have been shifted
     tap_code16_delay(KC_BSPC, 0);
 
-    // then, since LSHFT was also considered tapped, it has emitted the alpha, so we need to remove it
+    // then, since SHFT was also considered tapped, it has emitted the alpha, so we need to remove it
     tap_code16_delay(KC_BSPC, 0);
 
-    // then we hold down LSHFT while sending the just released key code again
-    register_code(KC_LEFT_SHIFT);
+    // then we hold down SHFT while sending the just released key code again
+    register_code(shift_keycode);
     tap_code16_delay(keycode, 0);
-    unregister_code(KC_LEFT_SHIFT);
+    unregister_code(shift_keycode);
+}
+
+void act_on_hold_linger_lshft(uint16_t keycode) {
+    act_on_hold_linger_shft(keycode, KC_LEFT_SHIFT);
 }
 
 void act_on_hold_linger_rshft(uint16_t keycode) {
-    // first, we delete the character that should have been shifted
-    tap_code16_delay(KC_BSPC, 0);
-
-    // then, since RSHFT was also considered tapped, it has emitted the alpha, so we need to remove it
-    tap_code16_delay(KC_BSPC, 0);
-
-    // then we hold down RSHFT while sending the just released key code again
-    register_code(KC_RIGHT_SHIFT);
-    tap_code16_delay(keycode, 0);
-    unregister_code(KC_RIGHT_SHIFT);
+    act_on_hold_linger_shft(keycode, KC_RIGHT_SHIFT);
 }
 
 uint16_t get_tapping_term(uint16_t keycode, keyrecord_t *record) {
