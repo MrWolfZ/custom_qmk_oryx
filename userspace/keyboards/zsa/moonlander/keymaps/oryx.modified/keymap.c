@@ -1,5 +1,12 @@
 #include QMK_KEYBOARD_H
 #include "version.h"
+
+// CUSTOM ADDITIONS START
+
+#include "print.h"
+
+// CUSTOM ADDITIONS END
+
 #define MOON_LED_LEVEL LED_LEVEL
 #define ML_SAFE_RANGE SAFE_RANGE
 
@@ -93,6 +100,18 @@ extern rgb_config_t rgb_matrix_config;
 
 void keyboard_post_init_user(void) {
   rgb_matrix_enable();
+
+
+  // CUSTOM ADDITIONS START
+
+#ifdef CONSOLE_ENABLE
+  debug_enable=true;
+  debug_matrix=true;
+  debug_keyboard=true;
+  //debug_mouse=true;
+#endif
+
+  // CUSTOM ADDITIONS END
 }
 
 
@@ -166,7 +185,120 @@ bool rgb_matrix_indicators_user(void) {
 }
 
 
+// CUSTOM ADDITIONS START
+
+// placeholder until we can use community modules with the ZSA firmware version
+static char buffer[32];
+
+const char* get_keycode_string(uint16_t keycode) {
+  buffer[0] = '\0';
+  return buffer;
+}
+
+// emulate sm_td behavior for hold keys to emit key output with hold
+// even when the hold key is released slightly before the target key
+void process_record_user_hold_linger(uint16_t keycode,
+                                     keyrecord_t *record,
+                                     uint16_t target_keycode,
+                                     uint16_t *tap_release_time,
+                                     char handedness,
+                                     void (*on_act)(uint16_t)
+                                    ) {
+  uint8_t mods = get_mods() | get_oneshot_mods();
+
+  // we ignore any situations in which other mods are held down
+  // since that would complicate things too much, and our primary
+  // use case only considers a single hold / mod key
+  if (mods != 0) {
+    *tap_release_time = 0;
+    return;
+  }
+
+  if (keycode == target_keycode && !record->event.pressed && record->tap.count) {
+#ifdef CONSOLE_ENABLE
+      uprintf("hold_linger_rel         : kc: 0x%04X, kch: %s, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u\n", keycode, get_keycode_string(keycode), record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count);
+#endif
+
+      *tap_release_time = record->event.time;
+
+      return;
+  }
+
+  // on the next event after hold key was released
+  if (*tap_release_time > 0) {
+      uint16_t time_since_release = record->event.time - *tap_release_time;
+      bool is_plain_alpha = keycode >= KC_A && keycode <= KC_Z;
+
+      // for other tap-hold keys the record->tap.count will be 1 if the key was settled as a tap, but for
+      // plain alpha keys the value will always be 0, so we just assume this was a tap release
+      bool is_tap_release = !record->event.pressed && (is_plain_alpha || record->tap.count);
+
+#ifdef CONSOLE_ENABLE
+      uprintf("hold_linger_detect      : kc: 0x%04X, kch: %s, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u, rel_time: %u, time_diff: %u, is_plain_alpha: %u, is_tap_release: %u, mods: %u\n", keycode, get_keycode_string(keycode), record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count, *tap_release_time, time_since_release, is_plain_alpha, is_tap_release, mods);
+#endif
+
+      // for chorded mod taps, the record of the press of the following key is delayed
+      // until after the release record of hold key, but the timestamp of the original event
+      // is still in the correct temporal order; therefore we can filter out any events
+      // that happened before the release
+      if (record->event.time < *tap_release_time) {
+          return;
+      }
+
+      // eagerly reset the release time to prevent leaking it into any nested keystrokes
+      *tap_release_time = 0;
+
+      // the key was on the opposite hand (i.e. we also emulate the chordal hold behavior)
+      bool is_not_same_hand_key = chordal_hold_layout[record->event.key.row][record->event.key.col] != handedness;
+
+      if (is_tap_release && time_since_release <= HOLD_LINGER_TERM && is_not_same_hand_key) {
+
+#ifdef CONSOLE_ENABLE
+            uprintf("hold_linger_start       : kc: 0x%04X, kch: %s, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u\n", keycode, get_keycode_string(keycode), record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count);
+#endif
+
+            on_act(keycode);
+
+#ifdef CONSOLE_ENABLE
+            uprintf("hold_linger_end         : kc: 0x%04X, kch: %s, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u\n", keycode, get_keycode_string(keycode), record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count);
+#endif
+      }
+  }
+}
+
+bool pre_process_record_user(uint16_t keycode, keyrecord_t *record) {
+
+#ifdef CONSOLE_ENABLE
+    uprintf("pre_process_record_user : kc: 0x%04X, kch: %s, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u\n", keycode, get_keycode_string(keycode), record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count);
+#endif
+
+  return true;
+}
+
+void post_process_record_user(uint16_t keycode, keyrecord_t *record) {
+
+#ifdef CONSOLE_ENABLE
+    uprintf("post_process_record_user: kc: 0x%04X, kch: %s, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u\n", keycode, get_keycode_string(keycode), record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count);
+#endif
+
+#ifdef CONSOLE_ENABLE
+    uprintf("\n");
+#endif
+}
+
+// CUSTOM ADDITIONS END
+
+
 bool process_record_user(uint16_t keycode, keyrecord_t *record) {
+
+  // CUSTOM ADDITIONS START
+
+#ifdef CONSOLE_ENABLE
+    uprintf("process_record_user     : kc: 0x%04X, kch: %s, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u\n", keycode, get_keycode_string(keycode), record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count);
+#endif
+
+  // CUSTOM ADDITIONS END
+
   switch (keycode) {
     case ST_MACRO_0:
     if (record->event.pressed) {
@@ -318,6 +450,19 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
         }
         return false;
   }
+
+  // CUSTOM ADDITIONS START
+
+  static uint16_t lshft_tap_release_time = 0;
+  void act_on_hold_linger_lshft(uint16_t keycode);
+  process_record_user_hold_linger(keycode, record, MT(MOD_LSFT, KC_I), &lshft_tap_release_time, 'L', &act_on_hold_linger_lshft);
+
+  static uint16_t rshft_tap_release_time = 0;
+  void act_on_hold_linger_rshft(uint16_t keycode);
+  process_record_user_hold_linger(keycode, record, MT(MOD_RSFT, KC_S), &rshft_tap_release_time, 'R', &act_on_hold_linger_rshft);
+
+  // CUSTOM ADDITIONS END
+
   return true;
 }
 
@@ -334,6 +479,32 @@ const char chordal_hold_layout[MATRIX_ROWS][MATRIX_COLS] PROGMEM =
       'L', 'L', 'L', 'L', 'L', '*',           '*', 'R', 'R', 'R', 'R', 'R',
                           '*', '*', '*', '*', '*', '*'
     );
+
+void act_on_hold_linger_lshft(uint16_t keycode) {
+    // first, we delete the character that should have been shifted
+    tap_code16_delay(KC_BSPC, 0);
+
+    // then, since LSHFT was also considered tapped, it has emitted the alpha, so we need to remove it
+    tap_code16_delay(KC_BSPC, 0);
+
+    // then we hold down LSHFT while sending the just released key code again
+    register_code(KC_LEFT_SHIFT);
+    tap_code16_delay(keycode, 0);
+    unregister_code(KC_LEFT_SHIFT);
+}
+
+void act_on_hold_linger_rshft(uint16_t keycode) {
+    // first, we delete the character that should have been shifted
+    tap_code16_delay(KC_BSPC, 0);
+
+    // then, since RSHFT was also considered tapped, it has emitted the alpha, so we need to remove it
+    tap_code16_delay(KC_BSPC, 0);
+
+    // then we hold down RSHFT while sending the just released key code again
+    register_code(KC_RIGHT_SHIFT);
+    tap_code16_delay(keycode, 0);
+    unregister_code(KC_RIGHT_SHIFT);
+}
 
 bool get_permissive_hold(uint16_t keycode, keyrecord_t *record) {
     switch (keycode) {
