@@ -1,3 +1,6 @@
 [submodule "qmk_firmware"]
 path = qmk_firmware
 url = https://github.com/zsa/qmk_firmware.git
+[submodule "userspace/modules/getreuer"]
+	path = userspace/modules/getreuer
+	url = https://github.com/getreuer/qmk-modules.git
