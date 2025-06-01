@@ -647,12 +647,12 @@ void post_process_record_user_openclose_combo(uint16_t keycode,
 
     *open_tap_time = 0;
 
-    tap_code16_delay(KC_LEFT, 0);
+    // the closing char might be a shifted character (e.g. RPAR) so we first clear
+    // the key since otherwise the LEFT tap would be shifted, which would lead to
+    // an unintended text selection of the closing char
+    unregister_code16(keycode);
 
-    // for some weird reason the LEFT tap causes the closing char to be selected, even
-    // though we have ensured that there are no active mods; as a cheap workaround we
-    // simply hit escape
-    tap_code16_delay(KC_ESC, 0);
+    tap_code16_delay(KC_LEFT, 0);
 }
 
 void post_process_record_user_openclose_combo_all(uint16_t keycode, keyrecord_t *record) {
