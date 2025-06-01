@@ -626,12 +626,12 @@ void post_process_record_user_openclose_combo(uint16_t keycode,
     }
 
     bool is_after_open_tap = record->event.time > *open_tap_time;
-    if (*open_tap_time == 0 || !is_after_open_tap) {
+    if (*open_tap_time == 0 || !is_after_open_tap || !record->event.pressed) {
         return;
     }
 
     uint16_t time_since_tap = record->event.time - *open_tap_time;
-    if (time_since_tap >= OPENCLOSE_COMBO_TERM) {
+    if (time_since_tap >= OPENCLOSE_COMBO_TERM || keycode != close_keycode) {
 #ifdef CONSOLE_ENABLE
         uprintf("openclose_combo_skip    : kc: 0x%04X, kch: %s, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u\n", keycode, get_keycode_string(keycode), record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count);
 #endif
@@ -640,21 +640,19 @@ void post_process_record_user_openclose_combo(uint16_t keycode,
         return;
     }
 
-    // at this point the closing char has been pressed shortly after the opening char
-    if (keycode == close_keycode && record->event.pressed) {
+    // at this point the closing char has been the first key press shortly after the opening char
 #ifdef CONSOLE_ENABLE
-        uprintf("openclose_combo_end     : kc: 0x%04X, kch: %s, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u\n", keycode, get_keycode_string(keycode), record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count);
+    uprintf("openclose_combo_end     : kc: 0x%04X, kch: %s, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u\n", keycode, get_keycode_string(keycode), record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count);
 #endif
 
-        *open_tap_time = 0;
+    *open_tap_time = 0;
 
-        tap_code16_delay(KC_LEFT, 0);
+    tap_code16_delay(KC_LEFT, 0);
 
-        // for some weird reason the LEFT tap causes the closing char to be selected, even
-        // though we have ensured that there are no active mods; as a cheap workaround we
-        // simply hit escape
-        tap_code16_delay(KC_ESC, 0);
-    }
+    // for some weird reason the LEFT tap causes the closing char to be selected, even
+    // though we have ensured that there are no active mods; as a cheap workaround we
+    // simply hit escape
+    tap_code16_delay(KC_ESC, 0);
 }
 
 void post_process_record_user_openclose_combo_all(uint16_t keycode, keyrecord_t *record) {
