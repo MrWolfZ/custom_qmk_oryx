@@ -692,6 +692,9 @@ void post_process_record_user_openclose_combo_all(uint16_t keycode, keyrecord_t 
 
     static uint16_t quo_tap_time = 0;
     post_process_record_user_openclose_combo(keycode, record, MT(MOD_LALT, KC_QUOTE), MT(MOD_LALT, KC_QUOTE), &quo_tap_time);
+
+    static uint16_t perc_tap_time = 0;
+    post_process_record_user_openclose_combo(keycode, record, KC_PERC, KC_PERC, &perc_tap_time);
 }
 
 // CUSTOM ADDITIONS END
