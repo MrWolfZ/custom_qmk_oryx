@@ -422,13 +422,13 @@ bool get_permissive_hold(uint16_t keycode, keyrecord_t *record) {
 }
 
 bool get_hold_on_other_key_press(uint16_t keycode, keyrecord_t *record) {
-    switch (keycode) {
+    switch (keycode & 0x00FF) {
         // we only want to enable early hold detection for some very few keys that are rarely
         // used in the normal flow of typing (with some exceptions like comma->space which are
         // solved using chordal holds below)
-        case LT(4, KC_COMMA): // num layer on comma
-        case LT(5, KC_ENTER): // code layer on enter (left thumb)
-        case LT(3, KC_DOT): // symbol layer on period (right thumb)
+        case KC_COMMA: // num layer on comma
+        case KC_ENTER: // code layer on enter (left thumb)
+        case KC_DOT: // symbol layer on period (right thumb)
             return true;
         default:
             // do not select the hold action when another key is pressed.
@@ -443,15 +443,15 @@ bool get_chordal_hold(uint16_t tap_hold_keycode, keyrecord_t* tap_hold_record,
 
     // there are some special situations in which we want to always suppress holds, especially
     // for keys with "hold on other key press" enabled
-    switch (tap_hold_keycode) {
-        case LT(4, KC_COMMA):
+    switch (tap_hold_keycode & 0x00FF) {
+        case KC_COMMA:
             // a space or line break after a comma should never enter the hold
             if (other_key_is_space || other_key_is_enter) {
                 return false;
             }
             break;
 
-        case LT(3, KC_DOT):
+        case KC_DOT:
             // when the dot is followed by a space or question mark, we still want to
             // type the dot before the other key, so we exclude those chords (which is
             // safe since those keys are the same on the symbol layer anyways); we also
@@ -516,7 +516,13 @@ void process_record_user_hold_linger(uint16_t keycode,
         return;
     }
 
-    if (keycode == target_keycode && !record->event.pressed && record->tap.count) {
+    bool is_plain_alpha_or_slash = (keycode >= KC_A && keycode <= KC_Z) || keycode == KC_SLASH;
+
+    // for tap-hold keys the record->tap.count will be 1 if the key was settled as a tap, but for
+    // plain alpha keys the value will always be 0, so we just assume this was a tap release
+    bool is_tap_release = !record->event.pressed && (is_plain_alpha_or_slash || record->tap.count);
+
+    if (keycode == target_keycode && is_tap_release) {
 #ifdef CONSOLE_ENABLE
         uprintf("hold_linger_rel         : kc: 0x%04X, kch: %s, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u\n", keycode, get_keycode_string(keycode), record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count);
 #endif
@@ -529,14 +535,9 @@ void process_record_user_hold_linger(uint16_t keycode,
     // on the next event after hold key was released
     if (*tap_release_time > 0) {
         uint16_t time_since_release = record->event.time - *tap_release_time;
-        bool is_plain_alpha = keycode >= KC_A && keycode <= KC_Z;
-
-        // for other tap-hold keys the record->tap.count will be 1 if the key was settled as a tap, but for
-        // plain alpha keys the value will always be 0, so we just assume this was a tap release
-        bool is_tap_release = !record->event.pressed && (is_plain_alpha || record->tap.count);
 
 #ifdef CONSOLE_ENABLE
-        uprintf("hold_linger_detect      : kc: 0x%04X, kch: %s, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u, rel_time: %u, time_diff: %u, is_plain_alpha: %u, is_tap_release: %u, mods: %u\n", keycode, get_keycode_string(keycode), record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count, *tap_release_time, time_since_release, is_plain_alpha, is_tap_release, mods);
+        uprintf("hold_linger_detect      : kc: 0x%04X, kch: %s, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u, rel_time: %u, time_diff: %u, is_plain_alpha_or_slash: %u, is_tap_release: %u, mods: %u\n", keycode, get_keycode_string(keycode), record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count, *tap_release_time, time_since_release, is_plain_alpha_or_slash, is_tap_release, mods);
 #endif
 
         // for chorded mod taps, the record of the press of the following key is delayed
@@ -597,6 +598,23 @@ void act_on_hold_linger_rshft(uint16_t keycode) {
     act_on_hold_linger_shft(keycode, KC_RIGHT_SHIFT);
 }
 
+void act_on_hold_linger_slash(uint16_t keycode) {
+    // this is a special case for the combination ./ which also could
+    // mean #, but because we generally have hold_on_other_key_press
+    // enabled for dot, we cannot use permissive_hold for this, which
+    // is why we work around this with a hold linger
+    if ((keycode & 0x00FF) != KC_DOT) {
+        return;
+    }
+
+    // first, we delete the ./
+    tap_code16_delay(KC_BSPC, 0);
+    tap_code16_delay(KC_BSPC, 0);
+
+    // then we type the hash
+    tap_code16_delay(KC_HASH, 0);
+}
+
 void process_record_user_hold_linger_all(uint16_t keycode, keyrecord_t *record) {
     static uint16_t lshft_tap_release_time = 0;
     uint16_t lshft_hold_linger_term = 50;
@@ -610,7 +628,7 @@ void process_record_user_hold_linger_all(uint16_t keycode, keyrecord_t *record) 
       &act_on_hold_linger_lshft);
 
     static uint16_t rshft_tap_release_time = 0;
-    uint16_t rshft_hold_linger_term = 45;
+    uint16_t rshft_hold_linger_term = 40; // higher term on RSHFT caused more false positives
     process_record_user_hold_linger(
       keycode,
       record,
@@ -619,6 +637,19 @@ void process_record_user_hold_linger_all(uint16_t keycode, keyrecord_t *record) 
       'R',
       rshft_hold_linger_term,
       &act_on_hold_linger_rshft);
+
+    // we are cheating a bit here by treating slash as a hold key (which it is not)
+    // to fix the issue where ./ should be recognized as #
+    static uint16_t slash_tap_release_time = 0;
+    uint16_t slash_hold_linger_term = 150;
+    process_record_user_hold_linger(
+      keycode,
+      record,
+      KC_SLASH,
+      &slash_tap_release_time,
+      '-',
+      slash_hold_linger_term,
+      &act_on_hold_linger_slash);
 }
 
 void post_process_record_user_openclose_combo(uint16_t keycode,
