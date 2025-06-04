@@ -501,6 +501,7 @@ void process_record_user_hold_linger(uint16_t keycode,
                                      uint16_t target_keycode,
                                      uint16_t *tap_release_time,
                                      char handedness,
+                                     uint16_t hold_linger_term,
                                      void (*on_act)(uint16_t)
                                     ) {
     uint8_t mods = get_mods() | get_oneshot_mods();
@@ -550,7 +551,7 @@ void process_record_user_hold_linger(uint16_t keycode,
         // the key was on the opposite hand (i.e. we also emulate the chordal hold behavior)
         bool is_not_same_hand_key = chordal_hold_layout[record->event.key.row][record->event.key.col] != handedness;
 
-        if (is_tap_release && time_since_release <= HOLD_LINGER_TERM && is_not_same_hand_key) {
+        if (is_tap_release && time_since_release <= hold_linger_term && is_not_same_hand_key) {
 
 #ifdef CONSOLE_ENABLE
             uprintf("hold_linger_start       : kc: 0x%04X, kch: %s, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u\n", keycode, get_keycode_string(keycode), record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count);
@@ -596,10 +597,26 @@ void act_on_hold_linger_rshft(uint16_t keycode) {
 
 void process_record_user_hold_linger_all(uint16_t keycode, keyrecord_t *record) {
     static uint16_t lshft_tap_release_time = 0;
-    process_record_user_hold_linger(keycode, record, MT(MOD_LSFT, KC_I), &lshft_tap_release_time, 'L', &act_on_hold_linger_lshft);
+    uint16_t lshft_hold_linger_term = 50;
+    process_record_user_hold_linger(
+      keycode,
+      record,
+      MT(MOD_LSFT, KC_I),
+      &lshft_tap_release_time,
+      'L',
+      lshft_hold_linger_term,
+      &act_on_hold_linger_lshft);
 
     static uint16_t rshft_tap_release_time = 0;
-    process_record_user_hold_linger(keycode, record, MT(MOD_RSFT, KC_S), &rshft_tap_release_time, 'R', &act_on_hold_linger_rshft);
+    uint16_t rshft_hold_linger_term = 45;
+    process_record_user_hold_linger(
+      keycode,
+      record,
+      MT(MOD_RSFT, KC_S),
+      &rshft_tap_release_time,
+      'R',
+      rshft_hold_linger_term,
+      &act_on_hold_linger_rshft);
 }
 
 void post_process_record_user_openclose_combo(uint16_t keycode,
