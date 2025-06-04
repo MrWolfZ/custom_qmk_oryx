@@ -15,7 +15,7 @@
 #define HOLD_ON_OTHER_KEY_PRESS
 #define HOLD_ON_OTHER_KEY_PRESS_PER_KEY
 
-#define CAPS_WORD_IDLE_TIMEOUT 2000 // the default of 5 seconds often leads to the mode to be active to long
+#define CAPS_WORD_IDLE_TIMEOUT 1500 // the default of 5 seconds often leads to the mode to be active to long
 
 #define USB_SUSPEND_WAKEUP_DELAY 0
 #define SERIAL_NUMBER "MBodL/Qzqxap"
