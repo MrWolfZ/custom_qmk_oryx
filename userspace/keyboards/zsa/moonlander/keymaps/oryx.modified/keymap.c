@@ -397,9 +397,11 @@ const char chordal_hold_layout[MATRIX_ROWS][MATRIX_COLS] PROGMEM =
     );
 
 uint16_t get_tapping_term(uint16_t keycode, keyrecord_t *record) {
-    switch (keycode) {
-        case LT(2, KC_SPACE):
+    switch (keycode & 0x00FF) {
+        case KC_SPACE:
             return TAPPING_TERM_FOR_SPACE;
+        case KC_DOT:
+            return TAPPING_TERM_FOR_DOT;
         default:
             return TAPPING_TERM;
     }
