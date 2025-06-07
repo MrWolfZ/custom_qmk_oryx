@@ -482,6 +482,24 @@ bool get_chordal_hold(uint16_t tap_hold_keycode, keyrecord_t* tap_hold_record,
     return get_chordal_hold_default(tap_hold_record, other_record);
 }
 
+// this is pretty much the default except we exclude some key codes
+bool is_flow_tap_key(uint16_t keycode) {
+    if ((get_mods() & (MOD_MASK_CG | MOD_BIT_LALT)) != 0) {
+        return false; // Disable Flow Tap on hotkeys.
+    }
+
+    switch (get_tap_keycode(keycode)) {
+        case KC_SPC:
+        case KC_A ... KC_Z:
+        // case KC_DOT:
+        case KC_COMM:
+        case KC_SCLN:
+        case KC_SLSH:
+            return true;
+    }
+    return false;
+}
+
 // this is pretty much the default except KC_MINUS is not shifted, since we have
 // dash and underscore on different keys; see here for docs: https://docs.qmk.fm/features/caps_word
 bool caps_word_press_user(uint16_t keycode) {
@@ -616,7 +634,7 @@ void act_on_hold_linger_rshft(uint16_t keycode) {
 
 void process_record_user_hold_linger_all(uint16_t keycode, keyrecord_t *record) {
     static uint16_t lshft_tap_release_time = 0;
-    uint16_t lshft_hold_linger_term = 50;
+    uint16_t lshft_hold_linger_term = 55;
     process_record_user_hold_linger(
       keycode,
       record,
