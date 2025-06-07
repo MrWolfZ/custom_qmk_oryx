@@ -538,6 +538,7 @@ void process_record_user_hold_linger(uint16_t keycode,
                                      uint16_t *tap_release_time,
                                      char handedness,
                                      uint16_t hold_linger_term,
+                                     bool *was_flow_tap,
                                      void (*on_act)(uint16_t)
                                     ) {
     uint8_t mods = get_mods() | get_oneshot_mods();
@@ -550,13 +551,28 @@ void process_record_user_hold_linger(uint16_t keycode,
         return;
     }
 
-    bool is_plain_alpha_or_slash = (keycode >= KC_A && keycode <= KC_Z) || keycode == KC_SLASH;
+    bool is_plain_alpha = keycode >= KC_A && keycode <= KC_Z;
+
+    bool is_tap = record->event.pressed && (is_plain_alpha || record->tap.count);
 
     // for tap-hold keys the record->tap.count will be 1 if the key was settled as a tap, but for
     // plain alpha keys the value will always be 0, so we just assume this was a tap release
-    bool is_tap_release = !record->event.pressed && (is_plain_alpha_or_slash || record->tap.count);
+    bool is_tap_release = !record->event.pressed && (is_plain_alpha || record->tap.count);
 
-    if (keycode == target_keycode && is_tap_release) {
+    // our hold linger logic doesn't propery detect flow tapping, so we simulate that ourselves
+    static uint16_t latest_tap_time = 0;
+
+    if (is_tap) {
+        if (keycode != target_keycode) {
+            latest_tap_time = record->event.time;
+            *was_flow_tap = false;
+        } else {
+            *was_flow_tap = TIMER_DIFF_16(record->event.time, latest_tap_time) <= FLOW_TAP_TERM;
+            latest_tap_time = 0;
+        }
+    }
+
+    if (keycode == target_keycode && is_tap_release && !*was_flow_tap) {
 #ifdef CONSOLE_ENABLE
         uprintf("hold_linger_rel         : kc: 0x%04X, kch: %s, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u\n", keycode, get_keycode_string(keycode), record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count);
 #endif
@@ -571,7 +587,7 @@ void process_record_user_hold_linger(uint16_t keycode,
         uint16_t time_since_release = record->event.time - *tap_release_time;
 
 #ifdef CONSOLE_ENABLE
-        uprintf("hold_linger_detect      : kc: 0x%04X, kch: %s, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u, rel_time: %u, time_diff: %u, is_plain_alpha_or_slash: %u, is_tap_release: %u, mods: %u\n", keycode, get_keycode_string(keycode), record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count, *tap_release_time, time_since_release, is_plain_alpha_or_slash, is_tap_release, mods);
+        uprintf("hold_linger_detect      : kc: 0x%04X, kch: %s, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u, rel_time: %u, time_diff: %u, is_plain_alpha: %u, is_tap_release: %u, mods: %u\n", keycode, get_keycode_string(keycode), record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count, *tap_release_time, time_since_release, is_plain_alpha, is_tap_release, mods);
 #endif
 
         // for chorded mod taps, the record of the press of the following key is delayed
@@ -635,6 +651,7 @@ void act_on_hold_linger_rshft(uint16_t keycode) {
 void process_record_user_hold_linger_all(uint16_t keycode, keyrecord_t *record) {
     static uint16_t lshft_tap_release_time = 0;
     uint16_t lshft_hold_linger_term = 55;
+    bool lshft_was_flow_tap = false;
     process_record_user_hold_linger(
       keycode,
       record,
@@ -642,10 +659,12 @@ void process_record_user_hold_linger_all(uint16_t keycode, keyrecord_t *record) 
       &lshft_tap_release_time,
       'L',
       lshft_hold_linger_term,
+      &lshft_was_flow_tap,
       &act_on_hold_linger_lshft);
 
     static uint16_t rshft_tap_release_time = 0;
     uint16_t rshft_hold_linger_term = 40; // higher term on RSHFT caused more false positives
+    bool rshft_was_flow_tap = false;
     process_record_user_hold_linger(
       keycode,
       record,
@@ -653,6 +672,7 @@ void process_record_user_hold_linger_all(uint16_t keycode, keyrecord_t *record) 
       &rshft_tap_release_time,
       'R',
       rshft_hold_linger_term,
+      &rshft_was_flow_tap,
       &act_on_hold_linger_rshft);
 }
 
