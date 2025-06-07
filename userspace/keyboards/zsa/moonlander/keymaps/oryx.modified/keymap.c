@@ -408,12 +408,13 @@ uint16_t get_tapping_term(uint16_t keycode, keyrecord_t *record) {
 }
 
 bool get_permissive_hold(uint16_t keycode, keyrecord_t *record) {
-    switch (keycode) {
+    switch (keycode & 0x00FF) {
         // we do not want to enable permissive hold for alphas that are rarely used for holding
-        case MT(MOD_LALT, KC_QUOTE):
-        case MT(MOD_LCTL, KC_E):
-        case MT(MOD_RCTL, KC_T):
-        case MT(MOD_RALT, KC_B):
+        case KC_E:
+        case KC_T:
+        case KC_QUOTE:
+        case KC_B:
+        case KC_W:
             return false;
         default:
             // enable permissive hold for all other keys
