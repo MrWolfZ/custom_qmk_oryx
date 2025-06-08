@@ -554,11 +554,12 @@ void process_record_user_hold_linger(uint16_t keycode,
 
     bool is_plain_alpha = keycode >= KC_A && keycode <= KC_Z;
 
-    bool is_tap = record->event.pressed && (is_plain_alpha || record->tap.count);
-
     // for tap-hold keys the record->tap.count will be 1 if the key was settled as a tap, but for
     // plain alpha keys the value will always be 0, so we just assume this was a tap release
     bool is_tap_release = !record->event.pressed && (is_plain_alpha || record->tap.count);
+
+#ifdef FLOW_TAP_TERM
+    bool is_tap = record->event.pressed && (is_plain_alpha || record->tap.count);
 
     // our hold linger logic doesn't propery detect flow tapping, so we simulate that ourselves
     static uint16_t latest_tap_time = 0;
@@ -572,6 +573,7 @@ void process_record_user_hold_linger(uint16_t keycode,
             latest_tap_time = 0;
         }
     }
+#endif
 
     if (keycode == target_keycode && is_tap_release && !*was_flow_tap) {
 #ifdef CONSOLE_ENABLE
@@ -652,6 +654,13 @@ void act_on_hold_linger_rshft(uint16_t keycode) {
 void process_record_user_hold_linger_all(uint16_t keycode, keyrecord_t *record) {
     static uint16_t lshft_tap_release_time = 0;
     uint16_t lshft_hold_linger_term = 55;
+
+    // 'is' is a commonly typed sequence that can cause false positives with a higher
+    // term, so we special case it
+    if ((keycode & 0x00FF) == KC_S) {
+      lshft_hold_linger_term = 35;
+    }
+
     bool lshft_was_flow_tap = false;
     process_record_user_hold_linger(
       keycode,
@@ -664,7 +673,11 @@ void process_record_user_hold_linger_all(uint16_t keycode, keyrecord_t *record) 
       &act_on_hold_linger_lshft);
 
     static uint16_t rshft_tap_release_time = 0;
-    uint16_t rshft_hold_linger_term = 40; // higher term on RSHFT caused more false positives
+
+    // it seems that typing a vowel after an 's' is either just faster or more common
+    // for me, but in any case, a higher term on RSHFT caused more false positives, so
+    // we reduce it
+    uint16_t rshft_hold_linger_term = 35;
     bool rshft_was_flow_tap = false;
     process_record_user_hold_linger(
       keycode,

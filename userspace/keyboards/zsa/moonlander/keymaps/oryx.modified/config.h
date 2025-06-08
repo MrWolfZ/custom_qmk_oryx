@@ -7,7 +7,8 @@
 #define TAPPING_TERM_FOR_SPACE 175
 #define TAPPING_TERM_FOR_DOT 250
 
-#define FLOW_TAP_TERM 150
+// tried this, but it caused too many false negatives when typing camelCase
+// #define FLOW_TAP_TERM 150
 
 #define OPENCLOSE_COMBO_TERM 300
 
