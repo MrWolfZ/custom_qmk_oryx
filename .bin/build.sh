@@ -38,6 +38,29 @@ keymap_dir="oryx.modified"
 
 cd qmk_firmware
 
+# workaround for missing call to pre_process_record_user in oryx firmware
+line_number=314
+oryx_file="keyboards/zsa/common/oryx.c"
+content=$(sed -n "${line_number}p" "$oryx_file")
+expected_content="    return true;"
+replacement="    return pre_process_record_user(keycode, record);"
+
+if [[ "$content" != "$expected_content" ]]; then
+  echo "pre_process_record_kb fix: line $line_number did not match expected content '$expected_content', was '$content'. Aborting..."
+  exit 1
+fi
+
+mv "$oryx_file" "${oryx_file}.tmp"
+
+revert_oryx_file() {
+  mv "${oryx_file}.tmp" "$oryx_file"
+}
+
+trap revert_oryx_file EXIT
+
+awk -v n="$line_number" -v r="$replacement" 'NR == n {$0 = r} {print}' "${oryx_file}.tmp" >"$oryx_file"
+# end workaround
+
 qmk config user.overlay_dir="$(realpath $SCRIPT_DIR/../userspace)"
 qmk compile -kb "$keyboard_directory/$geometry" -km "$keymap_dir"
 
