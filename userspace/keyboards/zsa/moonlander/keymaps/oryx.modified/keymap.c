@@ -350,8 +350,10 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
 
   // CUSTOM ADDITIONS START
 
-  void process_record_user_hold_linger_all(uint16_t keycode, keyrecord_t *record);
-  process_record_user_hold_linger_all(keycode, record);
+  bool process_hold_linger_all(uint16_t keycode, keyrecord_t *record, bool is_pre);
+  if (!process_hold_linger_all(keycode, record, false)) {
+    return false;
+  }
 
   // CUSTOM ADDITIONS END
 
@@ -368,7 +370,8 @@ bool pre_process_record_user(uint16_t keycode, keyrecord_t *record) {
     uprintf("pre_process_record_user : kc: 0x%04X, kch: %s, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u\n", keycode, get_keycode_string(keycode), record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count);
 #endif
 
-  return true;
+  bool process_hold_linger_all(uint16_t keycode, keyrecord_t *record, bool is_pre);
+  return process_hold_linger_all(keycode, record, true);
 }
 
 void post_process_record_user(uint16_t keycode, keyrecord_t *record) {
@@ -531,115 +534,261 @@ const char* get_keycode_string(uint16_t keycode) {
   return buffer;
 }
 
+typedef enum {
+  NONE,
+  HOLD_LINGER_PRESSED,
+  FOLLOWER_PRESSED,
+  HOLD_LINGER_RELEASED,
+  HOLD_LINGER_TAPPED,
+  HOLD_LINGER_TAP_RELEASED_BEFORE_FOLLOWER_TAP,
+  HOLD_LINGER_TAP_RELEASED_AFTER_FOLLOWER_TAP,
+  FOLLOWER_TAPPED_BEFORE_HOLD_LINGER_TAP_RELEASE,
+  FOLLOWER_TAPPED_AFTER_HOLD_LINGER_TAP_RELEASE,
+} hold_linger_state_t;
+
+typedef struct {
+    hold_linger_state_t state;
+    uint16_t hold_linger_release_time;
+    uint16_t follower_keycode;
+} hold_linger_record_t;
+
+hold_linger_record_t HL_NONE = {
+    state: NONE,
+};
+
 // emulate sm_td behavior for hold keys to emit key output with hold
 // even when the hold key is released slightly before the target key
-void process_record_user_hold_linger(uint16_t keycode,
-                                     keyrecord_t *record,
-                                     uint16_t target_keycode,
-                                     uint16_t *tap_release_time,
-                                     char handedness,
-                                     uint16_t hold_linger_term,
-                                     bool *was_flow_tap,
-                                     void (*on_act)(uint16_t)
-                                    ) {
-    uint8_t mods = get_mods() | get_oneshot_mods();
-
-    // we ignore any situations in which other mods are held down
-    // since that would complicate things too much, and our primary
-    // use case only considers a single hold / mod key
-    if (mods != 0) {
-        *tap_release_time = 0;
-        return;
-    }
-
+bool process_hold_linger(uint16_t keycode,
+                         keyrecord_t *record,
+                         uint16_t hold_linger_keycode,
+                         hold_linger_record_t *hl_record,
+                         char handedness,
+                         uint16_t hold_linger_term,
+                         void (*on_act)(uint16_t),
+                         bool is_pre
+                        ) {
     bool is_plain_alpha = keycode >= KC_A && keycode <= KC_Z;
+
+    bool is_press = record->event.pressed;
+    bool is_press_release = !record->event.pressed;
 
     // for tap-hold keys the record->tap.count will be 1 if the key was settled as a tap, but for
     // plain alpha keys the value will always be 0, so we just assume this was a tap release
+    bool is_tap = record->event.pressed && (is_plain_alpha || record->tap.count);
     bool is_tap_release = !record->event.pressed && (is_plain_alpha || record->tap.count);
 
+    bool is_hold_linger_key = keycode == hold_linger_keycode;
+    bool is_follower_key = keycode == hl_record->follower_keycode;
+
+    bool was_flow_press = false;
+
+    if (is_pre) {
 #ifdef FLOW_TAP_TERM
-    bool is_tap = record->event.pressed && (is_plain_alpha || record->tap.count);
+        // our hold linger logic doesn't propery detect flow tapping from the QMK feature, so we simulate that ourselves
+        static uint16_t latest_press_time = 0;
 
-    // our hold linger logic doesn't propery detect flow tapping, so we simulate that ourselves
-    static uint16_t latest_tap_time = 0;
-
-    if (is_tap) {
-        if (keycode != target_keycode) {
-            latest_tap_time = record->event.time;
-            *was_flow_tap = false;
-        } else {
-            *was_flow_tap = TIMER_DIFF_16(record->event.time, latest_tap_time) <= FLOW_TAP_TERM;
-            latest_tap_time = 0;
+        if (is_press) {
+            if (keycode != hold_linger_keycode) {
+                latest_press_time = record->event.time;
+            } else {
+                was_flow_press = TIMER_DIFF_16(record->event.time, latest_press_time) <= FLOW_TAP_TERM;
+                latest_press_time = 0;
+            }
         }
-    }
 #endif
 
-    if (keycode == target_keycode && is_tap_release && !*was_flow_tap) {
-#ifdef CONSOLE_ENABLE
-        uprintf("hold_linger_rel         : kc: 0x%04X, kch: %s, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u\n", keycode, get_keycode_string(keycode), record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count);
-#endif
+        switch (hl_record->state) {
+            case NONE:
+                if (is_hold_linger_key && is_press && !was_flow_press) {
+                    hl_record->state = HOLD_LINGER_PRESSED;
+                }
 
-        *tap_release_time = record->event.time;
+                return true;
 
-        return;
-    }
+            case HOLD_LINGER_PRESSED:
+                // the key was on the opposite hand (i.e. we also emulate the chordal hold behavior)
+                bool is_not_same_hand_key = chordal_hold_layout[record->event.key.row][record->event.key.col] != handedness;
 
-    // on the next event after hold key was released
-    if (*tap_release_time > 0) {
-        uint16_t time_since_release = record->event.time - *tap_release_time;
+                if (!is_hold_linger_key && is_press && is_not_same_hand_key) {
+                    hl_record->state = FOLLOWER_PRESSED;
+                    hl_record->follower_keycode = keycode;
+                } else {
+                    *hl_record = HL_NONE;
+                }
 
-#ifdef CONSOLE_ENABLE
-        uprintf("hold_linger_detect      : kc: 0x%04X, kch: %s, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u, rel_time: %u, time_diff: %u, is_plain_alpha: %u, is_tap_release: %u, mods: %u\n", keycode, get_keycode_string(keycode), record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count, *tap_release_time, time_since_release, is_plain_alpha, is_tap_release, mods);
-#endif
+                return true;
 
-        // for chorded mod taps, the record of the press of the following key is delayed
-        // until after the release record of hold key, but the timestamp of the original event
-        // is still in the correct temporal order; therefore we can filter out any events
-        // that happened before the release
-        if (record->event.time < *tap_release_time) {
-            return;
+            case FOLLOWER_PRESSED:
+                if (is_hold_linger_key && is_press_release) {
+                    hl_record->state = HOLD_LINGER_RELEASED;
+                    hl_record->hold_linger_release_time = record->event.time;
+                } else {
+                    *hl_record = HL_NONE;
+                }
+
+                return true;
+
+            default:
+                break;
         }
 
-        // eagerly reset the release time to prevent leaking it into any nested keystrokes
-        *tap_release_time = 0;
-
-        // the key was on the opposite hand (i.e. we also emulate the chordal hold behavior)
-        bool is_not_same_hand_key = chordal_hold_layout[record->event.key.row][record->event.key.col] != handedness;
-
-        if (is_tap_release && time_since_release <= hold_linger_term && is_not_same_hand_key) {
-
-#ifdef CONSOLE_ENABLE
-            uprintf("hold_linger_start       : kc: 0x%04X, kch: %s, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u\n", keycode, get_keycode_string(keycode), record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count);
-#endif
-
-            on_act(keycode);
-
-#ifdef CONSOLE_ENABLE
-            uprintf("hold_linger_end         : kc: 0x%04X, kch: %s, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u\n", keycode, get_keycode_string(keycode), record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count);
-#endif
-        }
+        return true;
     }
+
+    uint16_t hold_linger_plain_keycode = hold_linger_keycode & 0x00FF;
+
+    switch (hl_record->state) {
+        case NONE:
+            return true;
+
+        case HOLD_LINGER_RELEASED:
+            uint8_t mods = get_mods() | get_oneshot_mods();
+
+            // we ignore any situations in which other mods are held down
+            // since that would complicate things too much, and our primary
+            // use case only considers a single hold / mod key
+            if (is_hold_linger_key && is_tap && mods == 0) {
+                hl_record->state = HOLD_LINGER_TAPPED;
+                return false;
+            }
+
+            *hl_record = HL_NONE;
+            return true;
+
+        case HOLD_LINGER_TAPPED:
+            // if the follower is another hold-tap key, QMK (with our particular
+            // config at least) will send the tap release event before the follower
+            // tap event, so we need to account for that when we later need to
+            // replay the actions
+            if (is_hold_linger_key && is_tap_release) {
+                hl_record->state = HOLD_LINGER_TAP_RELEASED_BEFORE_FOLLOWER_TAP;
+                return false;
+            }
+
+            if (is_follower_key && is_tap) {
+                hl_record->state = FOLLOWER_TAPPED_BEFORE_HOLD_LINGER_TAP_RELEASE;
+                return false;
+            }
+
+            // we suppressed the *press* of hold linger before, so we need to send it now;
+            // the press release will be handled as normal once the tap release event
+            // is processed
+            register_code16(hold_linger_plain_keycode);
+
+            *hl_record = HL_NONE;
+            return true;
+
+        case HOLD_LINGER_TAP_RELEASED_BEFORE_FOLLOWER_TAP:
+            // the hold_linger release was sent before the follower tap, because the follower
+            // is also a hold-tap key
+            if (is_follower_key && is_tap) {
+                hl_record->state = FOLLOWER_TAPPED_AFTER_HOLD_LINGER_TAP_RELEASE;
+                return false;
+            }
+
+            // we suppressed the *tap* of hold linger before, so we need to send it now
+            tap_code16_delay(hold_linger_plain_keycode, 0);
+
+            *hl_record = HL_NONE;
+            return true;
+
+        case FOLLOWER_TAPPED_BEFORE_HOLD_LINGER_TAP_RELEASE:
+            // the hold_linger tap release was in between the follower tap and tap release
+            if (is_hold_linger_key && is_tap_release) {
+                hl_record->state = HOLD_LINGER_TAP_RELEASED_AFTER_FOLLOWER_TAP;
+                return false;
+            }
+
+            // we suppressed the *press* of both the hold linger key and the follower
+            // before, so we need to send them now
+            register_code16(hold_linger_plain_keycode);
+            register_code16(hl_record->follower_keycode);
+
+            *hl_record = HL_NONE;
+            return true;
+
+        case FOLLOWER_TAPPED_AFTER_HOLD_LINGER_TAP_RELEASE:
+            if (is_follower_key && is_tap_release) {
+                uint16_t time_since_release = TIMER_DIFF_16(record->event.time, hl_record->hold_linger_release_time);
+
+#ifdef CONSOLE_ENABLE
+                uprintf("hold_linger_decision    : hl_kc: 0x%04X, hl_kch: %s, state: %u, time_diff: %u, decision: %u\n", hold_linger_keycode, get_keycode_string(hold_linger_keycode), prev_state, time_since_release, time_since_release <= hold_linger_term);
+#endif
+
+                if (time_since_release <= hold_linger_term) {
+                    *hl_record = HL_NONE;
+                    on_act(keycode);
+                    return false;
+                }
+            }
+
+            // we suppressed the *tap* of hold linger before, so we need to send it now
+            tap_code16_delay(hold_linger_plain_keycode, 0);
+
+            // we suppressed the *press* of the follower before, so we need to send it now
+            register_code16(hl_record->follower_keycode);
+
+            *hl_record = HL_NONE;
+            return true;
+
+        case HOLD_LINGER_TAP_RELEASED_AFTER_FOLLOWER_TAP:
+            if (is_follower_key && is_tap_release) {
+                uint16_t time_since_release = TIMER_DIFF_16(record->event.time, hl_record->hold_linger_release_time);
+
+#ifdef CONSOLE_ENABLE
+                uprintf("hold_linger_decision    : hl_kc: 0x%04X, hl_kch: %s, state: %u, time_diff: %u, decision: %u\n", hold_linger_keycode, get_keycode_string(hold_linger_keycode), prev_state, time_since_release, time_since_release <= hold_linger_term);
+#endif
+
+                if (time_since_release <= hold_linger_term) {
+                    *hl_record = HL_NONE;
+                    on_act(keycode);
+                    return false;
+                }
+            }
+
+            // we suppressed the *press* of both the hold linger key and the follower
+            // before, and we also suppressed the tap release of the hold_linger key,
+            // so we need to send them now
+            register_code16(hold_linger_plain_keycode);
+            register_code16(hl_record->follower_keycode);
+            unregister_code16(hold_linger_plain_keycode);
+
+            *hl_record = HL_NONE;
+            return true;
+
+        default:
+            *hl_record = HL_NONE;
+            return true;
+    }
+
+    return true;
+}
+
+bool process_hold_linger_with_log(uint16_t keycode,
+                                  keyrecord_t *record,
+                                  uint16_t hold_linger_keycode,
+                                  hold_linger_record_t *hl_record,
+                                  char handedness,
+                                  uint16_t hold_linger_term,
+                                  void (*on_act)(uint16_t),
+                                  bool is_pre
+                                 ) {
+    hold_linger_state_t prev_state = hl_record->state;
+    bool result = process_hold_linger(keycode, record, hold_linger_keycode, hl_record, handedness, hold_linger_term, on_act, is_pre);
+    hold_linger_state_t next_state = hl_record->state;
+
+    if (prev_state != next_state) {
+#ifdef CONSOLE_ENABLE
+        uprintf("hold_linger_state       : hl_kc: 0x%04X, hl_kch: %s, state: %u -> %u\n", hold_linger_keycode, get_keycode_string(hold_linger_keycode), prev_state, next_state);
+#endif
+    }
+
+    return result;
 }
 
 void act_on_hold_linger_shft(uint16_t keycode, uint16_t shift_keycode) {
-    // the mask is getting rid of any mod/layer that might be attached to the letter
-    bool is_letter = (keycode & 0x00FF) >= KC_A && (keycode & 0x00FF) <= KC_Z;
-
-    // shifting only makes sense for letters
-    if (!is_letter) {
-        return;
-    }
-
-    // first, we delete the character that should have been shifted
-    tap_code16_delay(KC_BSPC, 0);
-
-    // then, since SHFT was also considered tapped, it has emitted the alpha, so we need to remove it
-    tap_code16_delay(KC_BSPC, 0);
-
-    // then we hold down SHFT while sending the just released key code again
     register_code(shift_keycode);
-    tap_code16_delay(keycode, 0);
+    tap_code16_delay(keycode & 0x00FF, 0);
     unregister_code(shift_keycode);
 }
 
@@ -651,8 +800,19 @@ void act_on_hold_linger_rshft(uint16_t keycode) {
     act_on_hold_linger_shft(keycode, KC_RIGHT_SHIFT);
 }
 
-void process_record_user_hold_linger_all(uint16_t keycode, keyrecord_t *record) {
-    static uint16_t lshft_tap_release_time = 0;
+bool process_hold_linger_all(uint16_t keycode, keyrecord_t *record, bool is_pre) {
+    bool is_letter = (keycode & 0x00FF) >= KC_A && (keycode & 0x00FF) <= KC_Z;
+
+    if (!is_letter) {
+      return true;
+    }
+
+    static hold_linger_record_t lshft_record = {
+        state: NONE,
+        hold_linger_release_time: 0,
+        follower_keycode: 0,
+    };
+
     uint16_t lshft_hold_linger_term = 55;
 
     // 'is' is a commonly typed sequence that can cause false positives with a higher
@@ -661,33 +821,38 @@ void process_record_user_hold_linger_all(uint16_t keycode, keyrecord_t *record) 
       lshft_hold_linger_term = 35;
     }
 
-    bool lshft_was_flow_tap = false;
-    process_record_user_hold_linger(
+    if (!process_hold_linger_with_log(
       keycode,
       record,
       MT(MOD_LSFT, KC_I),
-      &lshft_tap_release_time,
+      &lshft_record,
       'L',
       lshft_hold_linger_term,
-      &lshft_was_flow_tap,
-      &act_on_hold_linger_lshft);
+      &act_on_hold_linger_lshft,
+      is_pre)) {
+        return false;
+    }
 
-    static uint16_t rshft_tap_release_time = 0;
+    static hold_linger_record_t rshft_record = {
+        state: NONE,
+        hold_linger_release_time: 0,
+        follower_keycode: 0,
+    };
 
     // it seems that typing a vowel after an 's' is either just faster or more common
     // for me, but in any case, a higher term on RSHFT caused more false positives, so
     // we reduce it
     uint16_t rshft_hold_linger_term = 35;
-    bool rshft_was_flow_tap = false;
-    process_record_user_hold_linger(
+
+    return process_hold_linger_with_log(
       keycode,
       record,
       MT(MOD_RSFT, KC_S),
-      &rshft_tap_release_time,
+      &rshft_record,
       'R',
       rshft_hold_linger_term,
-      &rshft_was_flow_tap,
-      &act_on_hold_linger_rshft);
+      &act_on_hold_linger_rshft,
+      is_pre);
 }
 
 void post_process_record_user_openclose_combo(uint16_t keycode,
